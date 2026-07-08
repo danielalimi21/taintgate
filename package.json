@@ -1,0 +1,25 @@
+{
+  "name": "taintgate",
+  "version": "0.1.0",
+  "description": "Session-taint egress reference monitor for AI agents — stops confidential-data laundering to an allowed host, which host allowlisting and single-message content scanning both miss.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/monitor.js",
+    "./classify": "./src/classify.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "bench": "node bench/laundering-bypass.js"
+  },
+  "keywords": [
+    "ai-agents",
+    "agent-security",
+    "data-exfiltration",
+    "dlp",
+    "egress",
+    "prompt-injection",
+    "reference-monitor"
+  ],
+  "engines": { "node": ">=20" }
+}
