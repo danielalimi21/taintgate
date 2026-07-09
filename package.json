@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "bench": "node bench/laundering-bypass.js"
+    "bench": "node bench/laundering-bypass.js",
+    "bench:redteam": "node bench/redteam.js"
   },
   "keywords": [
     "ai-agents",

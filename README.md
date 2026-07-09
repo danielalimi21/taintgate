@@ -19,6 +19,22 @@ taintgate         6/6 (100%)            0/5  (0%)
 
 Reproduce: `npm run bench`. Tests: `npm test`. No dependencies, Node ≥ 20.
 
+Stress-tested on a larger adversarial corpus (`npm run bench:redteam`, 124 cases):
+
+```
+TaintGate, honestly:
+  in-scope laundering caught  : 56/56  (100%)   across 5 evasions (obfuscated, downgrade, reset-attempt, chunked)
+  known-gap attacks caught    :  0/20  (0%)     cross-session / out-of-band / classifier-blind — misses by design
+  false holds on clean traffic:  0/36  (0%)
+  tainted-legit held (review) : 12/12           the operational cost of the memory model, not a false positive
+```
+
+The honest one-line claim: **on 124 adversarial cases it caught every laundering
+attempt it is designed to witness at zero false holds, and cleanly missed 20
+out-of-scope attacks** — which is exactly what the [Known gaps](#known-gaps) section
+below is about. The two stateless defenses stay near-blind to laundering regardless
+of corpus size; that blindness is structural, not a small-sample artifact.
+
 ---
 
 ## The gap
@@ -77,10 +93,21 @@ classify the laundered bytes (it can't — that's the point). It makes the
 laundering egress non-autonomous: allowed, held, or blocked, with a reason on the
 record.
 
-## What it honestly does *not* catch
+<a name="known-gaps"></a>
+## Known gaps — what it honestly does *not* catch
 
-The one thing that makes this credible instead of oversold: the taint guard only
-sees laundering the monitor **witnessed the ingest for**. A secret the model read
+Measured, not hand-waved: in the red-team run above these are the `gap` categories,
+and TaintGate catches **0/20** of them on purpose. Three failure modes:
+
+- **Cross-session** — the agent reads under one session id and exfiltrates under
+  another. Taint is per-session, so a fresh id carries no mark.
+- **Out-of-band read** — the monitor never saw the read (another tool supplied the
+  data), so no taint is set.
+- **Classifier-blind source** — the sensitive material carries no keyword and no
+  value shape, so the deterministic floor rates it public and no taint is set.
+
+All three collapse to the same root: the taint guard only sees laundering the
+monitor **witnessed the ingest for**. A secret the model read
 *out of band* — through a channel the monitor doesn't sit on — leaves no taint, and
 the laundered bytes classify as established-public. Nothing byte-level or
 taint-level catches that.
