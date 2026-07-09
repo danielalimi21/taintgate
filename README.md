@@ -23,8 +23,8 @@ classifier-blind) — by design; that is what the fail-closed seal and the
 near-blind to laundering regardless of corpus size — the blindness is *structural*,
 not a small-sample artifact.
 
-Reproduce: `npm run bench:redteam` (124 cases) · `npm run bench` (6-case minimal) ·
-`npm test`. No dependencies, Node ≥ 20.
+Reproduce: `npm run bench` (124-case adversarial benchmark) · `npm test`.
+No dependencies, Node ≥ 20.
 
 ---
 
@@ -60,11 +60,11 @@ outbound bytes.
 
 The discriminating property, which no stateless control can reproduce:
 
-> `benign-clean-summary` and `launder-customer-table` in the corpus send the
-> **identical outbound bytes** to the **same allowed host**. TaintGate *allows the
-> first and holds the second*, because one session read confidential data first and
-> the other did not. A destination check and a byte check must give both the same
-> verdict — necessarily wrong for one of them.
+> The `clean-same-bytes` and `launder` cases in the corpus send the **identical
+> outbound bytes** to the **same allowed host** — the only difference is that the
+> laundering session read confidential data first. TaintGate *allows the clean one
+> and holds the laundering one*. A destination check and a byte check must give both
+> the same verdict — necessarily wrong for one of them.
 
 ```js
 import { TaintGate } from "taintgate";
