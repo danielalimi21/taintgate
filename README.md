@@ -1,5 +1,7 @@
 # TaintGate
 
+*In plain terms: it stops an AI agent from sneaking confidential data out disguised as harmless text.*
+
 **A session-taint egress reference monitor for AI agents.** It stops one specific,
 under-covered attack: an agent reads confidential data, the model rewrites it into
 benign-looking prose, and the agent posts that prose to a destination that is *on
@@ -7,33 +9,22 @@ the allowlist*. Host allowlisting and single-message content scanning both wave
 this through. TaintGate holds it.
 
 ```
-Confidential-data laundering to an allowed host — defense comparison
+Laundering caught — 124-case adversarial benchmark (of 56 in-scope attacks)
 ──────────────────────────────────────────────────────────────────────────────
-defense           laundering caught     false holds
-──────────────────────────────────────────────────────────────────────────────
-host-allowlist    0/6   (0%)            0/5  (0%)
-content-scan      1/6  (17%)            0/5  (0%)
-taintgate         6/6 (100%)            0/5  (0%)
+  host allowlisting     0 / 56
+  content scanning      8 / 56
+  taintgate            56 / 56      at 0 false holds on clean traffic
 ──────────────────────────────────────────────────────────────────────────────
 ```
 
-Reproduce: `npm run bench`. Tests: `npm test`. No dependencies, Node ≥ 20.
+TaintGate **also misses 20 / 20 out-of-scope attacks** (cross-session, out-of-band,
+classifier-blind) — by design; that is what the fail-closed seal and the
+[Known gaps](#known-gaps) section are for. The two stateless defenses stay
+near-blind to laundering regardless of corpus size — the blindness is *structural*,
+not a small-sample artifact.
 
-Stress-tested on a larger adversarial corpus (`npm run bench:redteam`, 124 cases):
-
-```
-TaintGate, honestly:
-  in-scope laundering caught  : 56/56  (100%)   across 5 evasions (obfuscated, downgrade, reset-attempt, chunked)
-  known-gap attacks caught    :  0/20  (0%)     cross-session / out-of-band / classifier-blind — misses by design
-  false holds on clean traffic:  0/36  (0%)
-  tainted-legit held (review) : 12/12           the operational cost of the memory model, not a false positive
-```
-
-The honest one-line claim: **on 124 adversarial cases it caught every laundering
-attempt it is designed to witness at zero false holds, and cleanly missed 20
-out-of-scope attacks** — which is exactly what the [Known gaps](#known-gaps) section
-below is about. The two stateless defenses stay near-blind to laundering regardless
-of corpus size; that blindness is structural, not a small-sample artifact.
+Reproduce: `npm run bench:redteam` (124 cases) · `npm run bench` (6-case minimal) ·
+`npm test`. No dependencies, Node ≥ 20.
 
 ---
 
