@@ -80,7 +80,7 @@ const INTERNAL_OUTPUT = "FYI sending the note to jane.doe@corp.com for the inter
 const STRUCTURED_LEGIT = [
   "name,count\nalpha,3\nbeta,5\ngamma,9\ndelta,2",                              // tabular_dump
   { items: Array.from({ length: 6 }, (_, i) => ({ id: i, ok: true })) },        // bulk_records
-  Buffer.from("public changelog notes ".repeat(30)).toString("hex")            // encoded_blob (benign, low entropy)
+  Buffer.from(Array.from({ length: 900 }, (_, i) => (i * 137 + 41) & 0xff)).toString("base64") // encoded_blob: a benign high-entropy attachment (held for review, NOT blocked as a secret)
 ];
 
 let SID = 0;

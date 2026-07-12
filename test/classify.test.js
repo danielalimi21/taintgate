@@ -50,6 +50,20 @@ test("a tabular dump is class-not-established", () => {
   assert.equal(c.egress_shape, "tabular_dump");
 });
 
+test("a benign high-entropy encoded attachment is held (blob), not blocked as a secret", () => {
+  const blob = Buffer.from("public changelog notes ".repeat(40)).toString("base64"); // ~1200 chars, high entropy
+  const c = classifyPayload(blob);
+  assert.ok(c.level < 5, "must not be classed a restricted secret");
+  assert.equal(c.established, false);
+  assert.equal(c.egress_shape, "encoded_blob");
+});
+
+test("a short opaque high-entropy token is still caught as a secret", () => {
+  const c = classifyPayload("session token 9f8Xk2Lm4Qp7Rt1Za6Bc3De5Fg8Hj0Kl2Mn4Op6Qr for the request");
+  assert.equal(c.level, 5);
+  assert.ok(c.findings.includes("api_secret"));
+});
+
 test("an external classifier can raise class and establishment, never lower", () => {
   const base = classifyPayload("some perfectly ordinary sentence");
   assert.equal(base.level, 1);

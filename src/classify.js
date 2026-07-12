@@ -130,13 +130,26 @@ function luhnValid(digits) {
   return sum % 10 === 0;
 }
 
-// A long, near-random token (high Shannon entropy) that is not a UUID — an opaque
-// API key / session token with no recognizable prefix.
+// The boundary between a secret TOKEN and an encoded BLOB. A leaked API key /
+// session token is bounded (tens of chars); a run past this length is a data dump
+// (a base64 attachment, an image, a hash stream), not a single credential.
+const SECRET_TOKEN_MAX = 100;
+const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+// A bounded, near-random token (high Shannon entropy) that is not a UUID — an opaque
+// API key / session token with no recognizable prefix. Bounded on length so a benign
+// encoded attachment is not misclassified as a proven secret and BLOCKED; long runs
+// are routed to the encoded-blob shape below (HELD for review) instead.
 function hasHighEntropyToken(text) {
   const tokens = String(text).match(/[A-Za-z0-9+/_-]{40,}/g) || [];
-  return tokens.some(
-    (t) => !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(t) && shannonEntropy(t) >= 4.6
-  );
+  return tokens.some((t) => t.length < SECRET_TOKEN_MAX && !UUID_RE.test(t) && shannonEntropy(t) >= 4.6);
+}
+
+// A long, near-random run — an opaque encoded blob. Class cannot be established from
+// it, so it is HELD for review, not blocked as if it were a proven secret.
+function hasLongHighEntropyRun(s) {
+  const tokens = String(s).match(/[A-Za-z0-9+/_-]{100,}/g) || [];
+  return tokens.some((t) => shannonEntropy(t) >= 4.6);
 }
 
 function shannonEntropy(value) {
@@ -165,7 +178,7 @@ function analyzeEgressShape(payload) {
 
   const strings = typeof payload === "string" ? [payload] : collectStrings(payload);
   if (strings.some(isTabularDump)) return "tabular_dump";
-  if (strings.some(isEncodedBlob)) return "encoded_blob";
+  if (strings.some(isEncodedBlob) || strings.some(hasLongHighEntropyRun)) return "encoded_blob";
   return null;
 }
 
