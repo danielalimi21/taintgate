@@ -6,7 +6,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/monitor.js",
-    "./classify": "./src/classify.js"
+    "./classify": "./src/classify.js",
+    "./classifiers/anthropic": "./src/classifiers/anthropic.js"
   },
   "scripts": {
     "test": "node --test test/*.test.js",

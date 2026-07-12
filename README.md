@@ -122,6 +122,35 @@ Consequences of the design, stated plainly:
   floor, and the constructor `classifier` hook wires it into **ingest** (where it
   matters — taint has to be set at read time). The external verdict can only raise
   class, never lower it. Use `ingestAsync()` for a classifier that returns a Promise.
+  A ready-to-use model-graded adapter ships in
+  [`taintgate/classifiers/anthropic`](#model-graded-classifier) — see below.
+
+<a name="model-graded-classifier"></a>
+### Model-graded classifier (bundled)
+
+`taintgate/classifiers/anthropic` is a zero-dependency adapter that grades each
+read with a Claude model, so taint fires on keyword-less confidential prose the
+deterministic floor rates public.
+
+```js
+import { TaintGate } from "taintgate";
+import { anthropicClassifier } from "taintgate/classifiers/anthropic";
+
+const gate = new TaintGate({ classifier: anthropicClassifier() });  // reads ANTHROPIC_API_KEY
+await gate.ingestAsync("session-42", confidentialFinancialMemo);    // async — awaits the grader
+```
+
+- Uses the global `fetch` (Node ≥ 20) to call the Anthropic Messages API directly;
+  structured outputs pin the verdict to a JSON schema. No SDK, no dependencies.
+- Defaults to `claude-haiku-4-5` — this runs on **every** witnessed read, so it must
+  be fast and cheap (classification is Haiku's canonical use case). Pass `model` to
+  override for higher-assurance sessions.
+- Verdicts are cached by payload (bounded) so identical reads are graded once.
+- Raise-only: a `public` verdict returns `null` and leaves the floor untouched. A
+  grading failure also returns `null` — fail-open on taint by design; pair with
+  `sealExternalEgress: true` for a fail-closed posture.
+- Options: `apiKey`, `model`, `maxChars`, `timeoutMs`, `cache`, `cacheMax`, `onError`,
+  `fetchImpl`.
 - Taint is coarse (a single high-water rank per session), not field-level lineage.
   That is deliberate — it is cheap, it cannot be gamed downward, and it is the
   right granularity for an allow/hold gate. Fine-grained provenance is a different,
@@ -169,6 +198,7 @@ gate.getIngestedRank(sessionId)                    → number
 
 classifyPayload(payload)   // "taintgate/classify" → { level, label, findings, egress_shape, established }
 mergeClassification(base, external)                // layer a model-graded/commercial classifier on top
+anthropicClassifier(opts)  // "taintgate/classifiers/anthropic" → async (payload) => external | null
 ```
 
 MIT licensed.
