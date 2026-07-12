@@ -116,9 +116,12 @@ Consequences of the design, stated plainly:
   layer control; it does not inspect TLS and does not replace network egress
   control — it complements it.
 - Data-class classification is a floor. The bundled classifier is deterministic
-  (keyword + value-shape + entropy + decode). `mergeClassification()` is the seam
-  for a model-graded or commercial classifier; the external verdict can only raise
-  class, never lower it.
+  (keyword + value-shape + entropy + decode) and is blind to confidential prose
+  carrying no keyword or value shape — that is why the seam below exists.
+  `mergeClassification()` fuses a model-graded or commercial classifier onto the
+  floor, and the constructor `classifier` hook wires it into **ingest** (where it
+  matters — taint has to be set at read time). The external verdict can only raise
+  class, never lower it. Use `ingestAsync()` for a classifier that returns a Promise.
 - Taint is coarse (a single high-water rank per session), not field-level lineage.
   That is deliberate — it is cheap, it cannot be gamed downward, and it is the
   right granularity for an allow/hold gate. Fine-grained provenance is a different,
@@ -155,9 +158,11 @@ control that stands on its own, with an added benchmark that isolates its effect
 ## API
 
 ```
-new TaintGate({ taintBlockLevel = 4, sensitiveBlockLevel = 5, sealExternalEgress = false })
+new TaintGate({ taintBlockLevel = 4, sensitiveBlockLevel = 5,
+  sealExternalEgress = false, classifier = null })    // classifier: model-graded verdict fused at ingest
 
 gate.ingest(sessionId, payload)                    → { ingestedRank, classification }
+gate.ingestAsync(sessionId, payload)               → Promise<{ ingestedRank, classification }>  // async classifier
 gate.egress(sessionId, payload, {                  → { decision, reasons, classification, ingestedRank }
   external = true, publicSink = false })              decision ∈ "allow" | "hold" | "block"
 gate.getIngestedRank(sessionId)                    → number

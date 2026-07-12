@@ -22,7 +22,7 @@
 // makes the laundering egress non-autonomous. Faithful extraction of the
 // `tainted-session-egress` + default-seal logic in ScopeZero's policy engine.
 
-import { classifyPayload } from "./classify.js";
+import { classifyPayload, mergeClassification } from "./classify.js";
 
 const CONFIDENTIAL = 4; // default taint threshold — see LEVELS in classify.js
 const RESTRICTED = 5;
@@ -34,17 +34,54 @@ export class TaintGate {
   //                       to a non-public-sink (default false; the precise control
   //                       is the taint guard, the seal is the belt-and-suspenders
   //                       posture, and it trades precision for safety honestly).
-  constructor({ taintBlockLevel = CONFIDENTIAL, sensitiveBlockLevel = RESTRICTED, sealExternalEgress = false } = {}) {
+  // classifier:           optional model-graded / commercial classifier layered onto
+  //                       the deterministic floor at INGEST time. This is the seam that
+  //                       makes taint fire on keyword-less confidential prose the
+  //                       deterministic floor rates public. A function
+  //                       (payload) => { level, established?, findings?, source? } | null.
+  //                       Its verdict can only RAISE class, never lower it (enforced by
+  //                       mergeClassification). Use ingestAsync() if it returns a Promise.
+  constructor({ taintBlockLevel = CONFIDENTIAL, sensitiveBlockLevel = RESTRICTED, sealExternalEgress = false, classifier = null } = {}) {
     this.taintBlockLevel = taintBlockLevel;
     this.sensitiveBlockLevel = sensitiveBlockLevel;
     this.sealExternalEgress = sealExternalEgress;
+    this.classifier = classifier;
     this.sessions = new Map(); // sessionId -> ingested-class high-water mark
   }
 
   // Record that a read / tool output exposed a session to some data. Monotonic:
   // the mark can only ever rise. Returns the new mark and the classification.
+  //
+  // The class is the deterministic floor FUSED with a model-graded verdict — either
+  // one passed explicitly as `classification`, or one produced by the configured
+  // `classifier`. The external verdict can only raise the class, never lower it.
+  // This is the whole point of the ingest seam: the laundering guard downstream is
+  // only as good as the class established here, and the deterministic floor is blind
+  // to confidential prose that carries no keyword or value shape.
   ingest(sessionId, payload, { classification = null } = {}) {
-    const c = classification || classifyPayload(payload);
+    const external = this._grade(payload, classification);
+    if (external && typeof external.then === "function") {
+      throw new Error("classifier returned a Promise — use ingestAsync() for an async model-graded classifier");
+    }
+    return this._record(sessionId, mergeClassification(classifyPayload(payload), external));
+  }
+
+  // Async ingest for a model-graded classifier that returns a Promise (a network
+  // call to a commercial DLP or an LLM judge). Same fusion, same monotonic record.
+  async ingestAsync(sessionId, payload, { classification = null } = {}) {
+    const external = await this._grade(payload, classification);
+    return this._record(sessionId, mergeClassification(classifyPayload(payload), external));
+  }
+
+  // Resolve the external verdict: an explicit one wins; otherwise the configured
+  // classifier is consulted; otherwise none (deterministic floor stands alone).
+  _grade(payload, explicit) {
+    if (explicit != null) return explicit;
+    return this.classifier ? this.classifier(payload) : null;
+  }
+
+  // Raise the session's high-water mark. Monotonic — it can only ever rise.
+  _record(sessionId, c) {
     const prev = this.sessions.get(sessionId) || 0;
     const next = Math.max(prev, c.level);
     this.sessions.set(sessionId, next);
