@@ -23,8 +23,15 @@ classifier-blind) — by design; that is what the fail-closed seal and the
 near-blind to laundering regardless of corpus size — the blindness is *structural*,
 not a small-sample artifact.
 
+The benchmark runs the **deterministic floor only** — no network — so the numbers
+stay reproducible offline. The 6 `classifier-blind` gaps in that 20 are the slice a
+model-graded classifier at ingest is built to close; wiring the bundled
+[Anthropic adapter](#model-graded-classifier) into `ingestAsync` catches them (the
+cross-session and out-of-band gaps are structural and remain the seal's job).
+
 Reproduce: `npm run bench` (124-case adversarial benchmark) · `npm test`.
-No dependencies, Node ≥ 20.
+Core is dependency-free, Node ≥ 20; the model-graded adapter is opt-in and also
+dependency-free (global `fetch`).
 
 ---
 
