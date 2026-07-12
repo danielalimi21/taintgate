@@ -9,13 +9,19 @@ the allowlist*. Host allowlisting and single-message content scanning both wave
 this through. TaintGate holds it.
 
 ```
-Laundering caught — 124-case adversarial benchmark (of 56 in-scope attacks)
+Laundering caught — 130-case adversarial benchmark (of 56 in-scope attacks)
 ──────────────────────────────────────────────────────────────────────────────
   host allowlisting     0 / 56
   content scanning      8 / 56
-  taintgate            56 / 56      at 0 false holds on clean traffic
+  taintgate            56 / 56      at 0 false holds on clean prose
 ──────────────────────────────────────────────────────────────────────────────
 ```
+
+One precision cost, stated up front and not hidden in that 0%: clean **structured
+or encoded** egress (a CSV, a bulk record array, an opaque blob) is held for review
+even from an untainted session — its class can't be positively established from the
+bytes, and "looks public" there is absence of evidence. The benchmark reports that
+as its own line (`clean STRUCTURED egress held: 6/6`), separate from false holds.
 
 TaintGate **also misses 20 / 20 out-of-scope attacks** (cross-session, out-of-band,
 classifier-blind) — by design; that is what the fail-closed seal and the
@@ -29,7 +35,7 @@ model-graded classifier at ingest is built to close; wiring the bundled
 [Anthropic adapter](#model-graded-classifier) into `ingestAsync` catches them (the
 cross-session and out-of-band gaps are structural and remain the seal's job).
 
-Reproduce: `npm run bench` (124-case adversarial benchmark) · `npm test`.
+Reproduce: `npm run bench` (130-case adversarial benchmark) · `npm test`.
 Core is dependency-free, Node ≥ 20; the model-graded adapter is opt-in and also
 dependency-free (global `fetch`).
 
@@ -76,15 +82,25 @@ The discriminating property, which no stateless control can reproduce:
 ```js
 import { TaintGate } from "taintgate";
 
-const gate = new TaintGate({ taintBlockLevel: 4 });   // 4 = confidential
+const gate = new TaintGate({
+  taintBlockLevel: 4,                     // 4 = confidential
+  publicSinkHosts: ["status.example.com"], // declared public-broadcast sinks
+  internalHosts: ["svc.internal"]          // hosts inside the trust boundary
+});
 
 gate.ingest("session-42", confidentialCustomerTable); // agent reads sensitive data
 // ... model rewrites it into a benign-looking summary ...
 gate.egress("session-42", "The quarterly review went well.", {
-  external: true, host: "api.github.com"
+  host: "api.github.com"                  // resolved external → held; recorded on the verdict
 });
-// → { decision: "hold", reasons: [{ code: "tainted-session-egress", ... }] }
+// → { decision: "hold", reasons: [{ code: "tainted-session-egress", ... }], host: "api.github.com" }
 ```
+
+`host` drives the destination decision: it resolves to a public sink or an internal
+host against the sets above, and is recorded on every verdict for the audit ledger.
+An explicit `external` / `publicSink` boolean still overrides it. TaintGate rides
+*behind* a host allowlist — this is a trust declaration layered on the payload/session
+signal, not a replacement for network egress control.
 
 This is a **floor control, not a detector.** It does not try to prove intent or
 classify the laundered bytes (it can't — that's the point). It makes the
@@ -158,6 +174,17 @@ await gate.ingestAsync("session-42", confidentialFinancialMemo);    // async —
   `sealExternalEgress: true` for a fail-closed posture.
 - Options: `apiKey`, `model`, `maxChars`, `timeoutMs`, `cache`, `cacheMax`, `onError`,
   `fetchImpl`.
+
+The unit tests exercise the adapter against injected fetch responses (no network).
+To validate the request wire-format and parsing against the live API:
+
+```
+ANTHROPIC_API_KEY=sk-ant-... npm run verify:anthropic
+```
+
+It grades one confidential and one public line, wires the grader into a `TaintGate`,
+and asserts the laundering egress is held while a clean session's identical bytes
+pass. Without the key it skips.
 - Taint is coarse (a single high-water rank per session), not field-level lineage.
   That is deliberate — it is cheap, it cannot be gamed downward, and it is the
   right granularity for an allow/hold gate. Fine-grained provenance is a different,
@@ -195,12 +222,15 @@ control that stands on its own, with an added benchmark that isolates its effect
 
 ```
 new TaintGate({ taintBlockLevel = 4, sensitiveBlockLevel = 5,
-  sealExternalEgress = false, classifier = null })    // classifier: model-graded verdict fused at ingest
+  sealExternalEgress = false, classifier = null,      // classifier: model-graded verdict fused at ingest
+  publicSinkHosts = [], internalHosts = [] })         // hosts that resolve the destination decision
 
 gate.ingest(sessionId, payload)                    → { ingestedRank, classification }
 gate.ingestAsync(sessionId, payload)               → Promise<{ ingestedRank, classification }>  // async classifier
-gate.egress(sessionId, payload, {                  → { decision, reasons, classification, ingestedRank }
-  external = true, publicSink = false })              decision ∈ "allow" | "hold" | "block"
+gate.egress(sessionId, payload, {                  → { decision, reasons, classification, ingestedRank, host }
+  host, external, publicSink })                       decision ∈ "allow" | "hold" | "block"
+                                                       // host resolves external/publicSink; an explicit
+                                                       // boolean overrides it
 gate.getIngestedRank(sessionId)                    → number
 
 classifyPayload(payload)   // "taintgate/classify" → { level, label, findings, egress_shape, established }

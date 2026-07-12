@@ -123,3 +123,32 @@ test("ingestAsync awaits a model-graded classifier and raises taint accordingly"
   assert.equal(ingestedRank, 4);
   assert.equal(g.egress("s1", BENIGN, { external: true }).decision, "hold");
 });
+
+// Destination awareness: host resolves external / public-sink when the caller
+// does not override with an explicit boolean, and is recorded for the ledger.
+test("a host in publicSinkHosts stands the taint guard down and is recorded on the verdict", () => {
+  const g = new TaintGate({ publicSinkHosts: ["status.example.com"] });
+  g.ingest("s1", CONFIDENTIAL);
+  const r = g.egress("s1", BENIGN, { host: "status.example.com" });
+  assert.equal(r.decision, "allow");
+  assert.equal(r.host, "status.example.com");
+});
+
+test("a host not declared public is treated external and the laundering egress is held", () => {
+  const g = new TaintGate({ publicSinkHosts: ["status.example.com"] });
+  g.ingest("s1", CONFIDENTIAL);
+  assert.equal(g.egress("s1", BENIGN, { host: "api.github.com" }).decision, "hold");
+});
+
+test("a host in internalHosts does not leave the trust boundary", () => {
+  const g = new TaintGate({ internalHosts: ["svc.internal"] });
+  g.ingest("s1", CONFIDENTIAL);
+  assert.equal(g.egress("s1", BENIGN, { host: "svc.internal" }).decision, "allow");
+});
+
+test("an explicit external/publicSink boolean overrides host resolution", () => {
+  const g = new TaintGate({ publicSinkHosts: ["status.example.com"] });
+  g.ingest("s1", CONFIDENTIAL);
+  // host says public sink, but the caller forces publicSink:false → held
+  assert.equal(g.egress("s1", BENIGN, { host: "status.example.com", publicSink: false }).decision, "hold");
+});

@@ -41,11 +41,23 @@ export class TaintGate {
   //                       (payload) => { level, established?, findings?, source? } | null.
   //                       Its verdict can only RAISE class, never lower it (enforced by
   //                       mergeClassification). Use ingestAsync() if it returns a Promise.
-  constructor({ taintBlockLevel = CONFIDENTIAL, sensitiveBlockLevel = RESTRICTED, sealExternalEgress = false, classifier = null } = {}) {
+  // publicSinkHosts:      hosts declared public-broadcast sinks. Egress to one is an
+  //                       audited, accepted broadcast — the taint guard and seal stand
+  //                       down. TaintGate rides BEHIND a host allowlist; it does not
+  //                       replace it, so this is a trust declaration, not a firewall.
+  // internalHosts:        hosts that do not leave the trust boundary. Egress to one is
+  //                       internal and is not this control's concern.
+  constructor({
+    taintBlockLevel = CONFIDENTIAL, sensitiveBlockLevel = RESTRICTED,
+    sealExternalEgress = false, classifier = null,
+    publicSinkHosts = [], internalHosts = []
+  } = {}) {
     this.taintBlockLevel = taintBlockLevel;
     this.sensitiveBlockLevel = sensitiveBlockLevel;
     this.sealExternalEgress = sealExternalEgress;
     this.classifier = classifier;
+    this.publicSinkHosts = new Set(publicSinkHosts.map((h) => h.toLowerCase()));
+    this.internalHosts = new Set(internalHosts.map((h) => h.toLowerCase()));
     this.sessions = new Map(); // sessionId -> ingested-class high-water mark
   }
 
@@ -90,25 +102,33 @@ export class TaintGate {
 
   getIngestedRank(sessionId) { return this.sessions.get(sessionId) || 0; }
 
-  // Decide an outbound request. `external` marks egress that leaves the trust
-  // boundary; `publicSink` marks a destination explicitly declared a
-  // public-broadcast sink (laundering there is an audited, accepted decision).
-  // Returns { decision: "allow"|"hold"|"block", reasons, classification, ingestedRank }.
-  egress(sessionId, payload, { external = true, publicSink = false, classification = null } = {}) {
+  // Decide an outbound request. Destination is resolved from `host` against the
+  // configured public-sink / internal host sets, unless the caller overrides with an
+  // explicit `external` / `publicSink` boolean (the override always wins). `external`
+  // marks egress that leaves the trust boundary; `publicSink` marks a destination
+  // declared a public-broadcast sink (laundering there is an audited, accepted
+  // decision). `host` is recorded on the verdict for the audit ledger.
+  // Returns { decision: "allow"|"hold"|"block", reasons, classification, ingestedRank, host }.
+  egress(sessionId, payload, { external, publicSink, host = null, classification = null } = {}) {
     const c = classification || classifyPayload(payload);
     const ingested = this.getIngestedRank(sessionId);
+    const key = host != null ? String(host).toLowerCase() : null;
+    const isExternal = external !== undefined ? external : (key != null ? !this.internalHosts.has(key) : true);
+    const isPublicSink = publicSink !== undefined ? publicSink : (key != null && this.publicSinkHosts.has(key));
     const reasons = [];
+    const at = host != null ? ` (dest: ${host})` : "";
+    const verdict = (decision) => ({ decision, reasons, classification: c, ingestedRank: ingested, host: host ?? null });
 
-    if (!external) {
-      return { decision: "allow", reasons, classification: c, ingestedRank: ingested };
+    if (!isExternal) {
+      return verdict("allow");
     }
 
     // 1. Outbound content is itself sensitive at/above the block line → hard stop.
     //    (The easy case; a content scanner catches this too. Included so the
     //    monitor is complete, not to claim novelty here.)
     if (c.level >= this.sensitiveBlockLevel) {
-      reasons.push({ code: "sensitive-egress", detail: `Outbound ${c.label} content crossing an external boundary.` });
-      return { decision: "block", reasons, classification: c, ingestedRank: ingested };
+      reasons.push({ code: "sensitive-egress", detail: `Outbound ${c.label} content crossing an external boundary${at}.` });
+      return verdict("block");
     }
 
     // 2. Laundering guard — the core control. The session ingested data at/above
@@ -116,12 +136,12 @@ export class TaintGate {
     //    downgrade is the laundering signature; the bytes look benign precisely
     //    because they were rewritten. Egress at/above the ingested class is already
     //    handled by (1)/data-class gates, so this fires only on the downgrade.
-    if (ingested >= this.taintBlockLevel && c.level < ingested && !publicSink) {
+    if (ingested >= this.taintBlockLevel && c.level < ingested && !isPublicSink) {
       reasons.push({
         code: "tainted-session-egress",
-        detail: `Session ingested ${labelFor(ingested)} data; outbound ${c.label} content could be laundered. Held for review.`
+        detail: `Session ingested ${labelFor(ingested)} data; outbound ${c.label} content could be laundered${at}. Held for review.`
       });
-      return { decision: "hold", reasons, classification: c, ingestedRank: ingested };
+      return verdict("hold");
     }
 
     // 3. Opaque egress — the outbound class could not be positively established as
@@ -130,9 +150,9 @@ export class TaintGate {
     if (c.level <= 1 && c.established !== true) {
       reasons.push({
         code: "unverified-egress-class",
-        detail: `Outbound class not established from the bytes (shape: ${c.egress_shape}). Held for review.`
+        detail: `Outbound class not established from the bytes (shape: ${c.egress_shape})${at}. Held for review.`
       });
-      return { decision: "hold", reasons, classification: c, ingestedRank: ingested };
+      return verdict("hold");
     }
 
     // 4. Default seal (opt-in) — the honest fail-closed posture. A secret read
@@ -142,15 +162,15 @@ export class TaintGate {
     //    sound posture is to hold ALL meaningful external egress that is not to a
     //    declared public sink. Off by default because it trades precision for
     //    safety; turn it on for high-assurance sessions.
-    if (this.sealExternalEgress && !publicSink) {
+    if (this.sealExternalEgress && !isPublicSink) {
       reasons.push({
         code: "external-egress-sealed",
-        detail: "External egress sealed to review by default. Declare a public-broadcast sink to keep this lane autonomous."
+        detail: `External egress sealed to review by default${at}. Declare a public-broadcast sink to keep this lane autonomous.`
       });
-      return { decision: "hold", reasons, classification: c, ingestedRank: ingested };
+      return verdict("hold");
     }
 
-    return { decision: "allow", reasons, classification: c, ingestedRank: ingested };
+    return verdict("allow");
   }
 }
 
